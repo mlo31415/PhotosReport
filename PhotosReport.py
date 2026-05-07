@@ -339,6 +339,9 @@ class App:
 
         self._busy = True
         self._gen_btn.config(state=tk.DISABLED)
+        self._log.config(state=tk.NORMAL)
+        self._log.delete("1.0", tk.END)
+        self._log.config(state=tk.DISABLED)
         self._log_msg("Connecting…")
 
         def status_cb(msg: str) -> None:
