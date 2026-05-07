@@ -177,8 +177,7 @@ def _write_html_report(rows: list, lesser: list,
         return f"<li>Added smaller numbers of photos to {body}.</li>"
 
     with _REPORT_HTML.open("w", encoding="utf-8") as f:
-        f.write(f"<b>Photos added to the following albums:</b>"
-                f" ({start} to {end})<br>\n")
+        f.write(f"<b>Photos added to the following albums:</b><br>\n")
         f.write(f"{albums_checked:,} albums checked, "
                 f"{total_photos:,} total photos, "
                 f"{total_updated:,} updated in this period<br>\n")
