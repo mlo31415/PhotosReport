@@ -88,20 +88,24 @@ def run_report(start: date,
         status_cb(f"{"#":>4}  {"Updates":>7}  Album")
         status_cb(f"{'-'*4}  {'-'*7}  {'-'*30}")
 
-        rows    = []
-        lesser  = []   # albums with 0 < updates < cutoff
-        num     = 0
-        checked = 0
+        rows          = []
+        lesser        = []   # albums with 0 < updates < cutoff
+        num           = 0
+        checked       = 0
+        total_photos  = 0
+        total_updated = 0
         for album in checkable:
             cat_id    = int(album["id"])
             nb_direct = int(album.get("nb_images", 0))
 
             updates = _count_updates(client, cat_id, start, end)
-            checked += 1
+            checked      += 1
+            total_photos += nb_direct
             if progress_cb:
                 progress_cb(checked, total)
             if updates > 0:
-                num += 1
+                num           += 1
+                total_updated += updates
                 status_cb(f"{num:>4}  {updates:>7}  {album.get('name', '')}")
             if updates >= cutoff:
                 rows.append({
@@ -116,8 +120,8 @@ def run_report(start: date,
 
         rows.sort(key=lambda r: r["updates"], reverse=True)
         base_url = creds["url"].rstrip("/")
-        _write_report(rows, start, end, cutoff)
-        _write_html_report(rows, lesser, base_url, start, end)
+        _write_report(rows, start, end, cutoff, total, total_photos, total_updated)
+        _write_html_report(rows, lesser, base_url, start, end, total, total_photos, total_updated)
         status_cb(f"Done — {len(rows)} album(s) written to {_REPORT_FILE.name} / {_REPORT_HTML.name}")
 
     finally:
@@ -127,7 +131,8 @@ def run_report(start: date,
             pass
 
 
-def _write_report(rows: list, start: date, end: date, cutoff: int) -> None:
+def _write_report(rows: list, start: date, end: date, cutoff: int,
+                  albums_checked: int, total_photos: int, total_updated: int) -> None:
     col_num  = max(len("#"),       len(str(len(rows))))
     col_upd  = max(len("Updates"), 7)
     col_name = max(len("Album"),   *(len(r["name"]) for r in rows) if rows else [0])
@@ -140,6 +145,9 @@ def _write_report(rows: list, start: date, end: date, cutoff: int) -> None:
         f.write(f"Date range : {start}  to  {end}\n")
         f.write(f"Cutoff     : {cutoff} update(s) minimum\n")
         f.write(f"Generated  : {datetime.now():%Y-%m-%d %H:%M:%S}\n")
+        f.write(f"Albums checked : {albums_checked:,}  |  "
+                f"Total photos : {total_photos:,}  |  "
+                f"Updated in period : {total_updated:,}\n")
         f.write("\n")
 
         if not rows:
@@ -155,7 +163,8 @@ def _write_report(rows: list, start: date, end: date, cutoff: int) -> None:
 
 
 def _write_html_report(rows: list, lesser: list,
-                       base_url: str, start: date, end: date) -> None:
+                       base_url: str, start: date, end: date,
+                       albums_checked: int, total_photos: int, total_updated: int) -> None:
     def _lesser_line(names: list) -> str:
         if not names:
             return ""
@@ -167,6 +176,9 @@ def _write_html_report(rows: list, lesser: list,
     with _REPORT_HTML.open("w", encoding="utf-8") as f:
         f.write(f"<b>Photos:</b> Added photos to Piwigo albums"
                 f" ({start} to {end})<br>\n")
+        f.write(f"{albums_checked:,} albums checked, "
+                f"{total_photos:,} total photos, "
+                f"{total_updated:,} updated in this period<br>\n")
         f.write("<ul>\n")
         for r in rows:
             url = f"{base_url}/index.php?/category/{r['cat_id']}"
