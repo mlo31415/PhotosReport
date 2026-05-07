@@ -58,8 +58,8 @@ def _count_updates(client: AlbumHierarchy.PiwigoClient,
         "per_page":             1,
         "page":                 0,
         "f_fields":             "id",
-        "f_min_date_available": start.strftime("%Y-%m-%d"),
-        "f_max_date_available": end.strftime("%Y-%m-%d"),
+        "f_min_date_available": start.strftime("%Y-%m-%d 00:00:00"),
+        "f_max_date_available": end.strftime("%Y-%m-%d 23:59:59"),
     })
     return int(result.get("paging", {}).get("total_count", 0))
 
@@ -80,7 +80,10 @@ def run_report(start: date,
 
         status_cb("Fetching album list…")
         albums = client.get_albums()
-        checkable = [a for a in albums if int(a.get("nb_images", 0)) > 0]
+        _ignored = {"xxtest", "yytest", "ztest"}
+        checkable = [a for a in albums
+                     if int(a.get("nb_images", 0)) > 0
+                     and a.get("name", "").lower() not in _ignored]
         total = len(checkable)
         if progress_cb:
             progress_cb(0, total)
@@ -174,7 +177,7 @@ def _write_html_report(rows: list, lesser: list,
         return f"<li>Added smaller numbers of photos to {body}.</li>"
 
     with _REPORT_HTML.open("w", encoding="utf-8") as f:
-        f.write(f"<b>Photos:</b> Added photos to Piwigo albums"
+        f.write(f"<b>Photos added to the following albums:</b>"
                 f" ({start} to {end})<br>\n")
         f.write(f"{albums_checked:,} albums checked, "
                 f"{total_photos:,} total photos, "
