@@ -13,99 +13,15 @@ from tkinter import messagebox, ttk
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PiwigoHelpers import AlbumHierarchy
 from PiwigoHelpers.DateUtils import parse_date
+from PiwigoHelpers.CredentialStore import CredentialStore, CredentialError
 
 # ── paths ─────────────────────────────────────────────────────────────────────
-_HERE         = Path(__file__).resolve().parent
-_STATE_FILE   = _HERE / "PhotosReport State.json"
-_REPORT_FILE  = _HERE / "report.txt"
-_REPORT_HTML  = _HERE / "report.html"
-_CREDS_FILE   = _HERE / "Piwigo Credentials.json"
-_PARAMS_FILE  = _HERE / "PhotosReport Params.json"
+_HERE       = Path(__file__).resolve().parent
+_STATE_FILE = _HERE / "PhotosReport State.json"
+_REPORT_FILE = _HERE / "report.txt"
+_REPORT_HTML = _HERE / "report.html"
 
-# Point AlbumHierarchy at the local params file (fallback only).
-AlbumHierarchy.PARAMS_FILE = _PARAMS_FILE
-
-_CREDS_KEYS = ("url", "username", "password", "verify_ssl")
-
-
-# ── credentials helpers ───────────────────────────────────────────────────────
-
-class CredentialsError(Exception):
-    """Raised when no usable credentials can be found; message is user-facing."""
-
-
-def _load_credentials() -> dict:
-    """Load Piwigo credentials.
-
-    Primary source: Piwigo Credentials.json in this directory.
-    Fallback: PhotosReport Params.json (any credential keys found there).
-    Whenever the fallback is used the credentials are written to the primary
-    file so future runs use it directly.
-
-    Raises CredentialsError with a user-facing message if neither file
-    provides the required fields.
-    """
-    # ── primary: dedicated credentials file ──────────────────────────────────
-    if _CREDS_FILE.exists():
-        try:
-            data = json.loads(_CREDS_FILE.read_text(encoding="utf-8"))
-        except Exception as exc:
-            raise CredentialsError(
-                f"Could not read {_CREDS_FILE.name}:\n{exc}\n\n"
-                f"Fix or delete the file and try again."
-            )
-        missing = [k for k in ("url", "username", "password") if not data.get(k)]
-        if missing:
-            raise CredentialsError(
-                f"{_CREDS_FILE.name} is missing required fields: "
-                f"{', '.join(missing)}\n\n"
-                f"Expected file ({_CREDS_FILE}):\n"
-                "{\n"
-                '  "url":      "https://your-piwigo-site.example.com",\n'
-                '  "username": "your-username",\n'
-                '  "password": "your-password",\n'
-                '  "verify_ssl": true\n'
-                "}"
-            )
-        return data
-
-    # ── fallback: PhotosReport Params.json ──────────────────────────────────
-    if not _PARAMS_FILE.exists():
-        raise CredentialsError(
-            f"No credentials file was found.\n\n"
-            f"Please create one of:\n"
-            f"  • {_CREDS_FILE}\n"
-            f"  • {_PARAMS_FILE}\n\n"
-            "The file must contain:\n"
-            "{\n"
-            '  "url":      "https://your-piwigo-site.example.com",\n'
-            '  "username": "your-username",\n'
-            '  "password": "your-password",\n'
-            '  "verify_ssl": true\n'
-            "}"
-        )
-    try:
-        params = AlbumHierarchy.load_params()
-    except Exception as exc:
-        raise CredentialsError(
-            f"Could not read {_PARAMS_FILE.name}:\n{exc}"
-        )
-    missing = [k for k in ("url", "username", "password") if not params.get(k)]
-    if missing:
-        raise CredentialsError(
-            f"{_PARAMS_FILE.name} is missing required fields: "
-            f"{', '.join(missing)}"
-        )
-    creds = {k: params[k] for k in _CREDS_KEYS if k in params}
-    _save_credentials(creds)   # migrate to credentials file
-    return creds
-
-
-def _save_credentials(creds: dict) -> None:
-    try:
-        _CREDS_FILE.write_text(json.dumps(creds, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+_store = CredentialStore(_HERE, "PhotosReport Params.json")
 
 
 # ── state helpers ─────────────────────────────────────────────────────────────
@@ -151,9 +67,10 @@ def _count_updates(client: AlbumHierarchy.PiwigoClient,
 def run_report(start: date,
                end: date,
                cutoff: int,
-               status_cb) -> None:
+               status_cb,
+               progress_cb=None) -> None:
     """Fetch data from Piwigo and write report.txt.  Runs in a worker thread."""
-    creds  = _load_credentials()
+    creds  = _store.load_credentials()
     client = AlbumHierarchy.PiwigoClient(
         creds["url"], creds["username"], creds["password"],
         verify_ssl=creds.get("verify_ssl", True),
@@ -163,19 +80,26 @@ def run_report(start: date,
 
         status_cb("Fetching album list…")
         albums = client.get_albums()
+        checkable = [a for a in albums if int(a.get("nb_images", 0)) > 0]
+        total = len(checkable)
+        if progress_cb:
+            progress_cb(0, total)
+
         status_cb(f"{"#":>4}  {"Updates":>7}  Album")
         status_cb(f"{'-'*4}  {'-'*7}  {'-'*30}")
 
-        rows   = []
-        lesser = []   # albums with 0 < updates < cutoff
-        num    = 0
-        for album in albums:
+        rows    = []
+        lesser  = []   # albums with 0 < updates < cutoff
+        num     = 0
+        checked = 0
+        for album in checkable:
             cat_id    = int(album["id"])
             nb_direct = int(album.get("nb_images", 0))
-            if nb_direct == 0:
-                continue
 
             updates = _count_updates(client, cat_id, start, end)
+            checked += 1
+            if progress_cb:
+                progress_cb(checked, total)
             if updates > 0:
                 num += 1
                 status_cb(f"{num:>4}  {updates:>7}  {album.get('name', '')}")
@@ -294,13 +218,16 @@ class App:
         ttk.Separator(outer, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(12, 6))
 
         btn_row = ttk.Frame(outer)
-        btn_row.pack(pady=(0, 4))
+        btn_row.pack(fill=tk.X, pady=(0, 4))
         self._gen_btn = ttk.Button(btn_row, text="Generate Report",
                                    command=self._on_generate)
-        self._gen_btn.pack(side=tk.LEFT, padx=4)
+        self._gen_btn.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(btn_row, text="Exit", command=self._on_close).pack(
-            side=tk.LEFT, padx=4
+            side=tk.RIGHT, padx=(4, 0)
         )
+        self._progress_var = tk.StringVar(value="")
+        ttk.Label(btn_row, textvariable=self._progress_var,
+                  anchor="center").pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         ttk.Separator(outer, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(6, 6))
 
@@ -405,10 +332,14 @@ class App:
         def status_cb(msg: str) -> None:
             self.root.after(0, lambda m=msg: self._log_msg(m))
 
+        def progress_cb(checked: int, total: int) -> None:
+            msg = f"{checked} of {total} albums checked"
+            self.root.after(0, lambda m=msg: self._progress_var.set(m))
+
         def worker() -> None:
             try:
-                run_report(start, end, cutoff, status_cb)
-            except CredentialsError as exc:
+                run_report(start, end, cutoff, status_cb, progress_cb)
+            except CredentialError as exc:
                 self.root.after(0, lambda e=str(exc): messagebox.showerror(
                     "Credentials Not Found", e
                 ))
@@ -425,6 +356,7 @@ class App:
     def _done(self) -> None:
         self._busy  = False
         self._gen_btn.config(state=tk.NORMAL)
+        self._progress_var.set("")
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
