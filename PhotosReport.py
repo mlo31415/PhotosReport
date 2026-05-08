@@ -8,15 +8,26 @@ from datetime import date, datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
+#
+# ---------------------------------------------------------------------------
+# Locate and import the shared AlbumHierarchy module
+# ---------------------------------------------------------------------------
+if getattr(sys, "frozen", False):
+    _SCRIPT_DIR = Path(sys.executable).resolve().parent
+else:
+    _SCRIPT_DIR = Path(__file__).resolve().parent
 
-# ── path: make PiwigoHelpers importable ───────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from PiwigoHelpers import AlbumHierarchy
-from PiwigoHelpers.DateUtils import parse_date
-from PiwigoHelpers.CredentialStore import CredentialStore, CredentialError
+_PIWIGO_HELPERS = _SCRIPT_DIR.parent / "PiwigoHelpers"
+if str(_PIWIGO_HELPERS) not in sys.path:
+    sys.path.insert(0, str(_PIWIGO_HELPERS))
+
+# # ── path: make PiwigoHelpers importable ───────────────────────────────────────
+import AlbumHierarchy
+from DateUtils import parse_date
+from CredentialStore import CredentialStore, CredentialError
 
 # ── paths ─────────────────────────────────────────────────────────────────────
-_HERE       = Path(__file__).resolve().parent
+_HERE       = _SCRIPT_DIR
 _STATE_FILE = _HERE / "PhotosReport State.json"
 _REPORT_FILE = _HERE / "report.txt"
 _REPORT_HTML = _HERE / "report.html"
@@ -122,9 +133,8 @@ def run_report(start: date,
                 lesser.append(album.get("fullname", album.get("name", "")))
 
         rows.sort(key=lambda r: r["updates"], reverse=True)
-        base_url = creds["url"].rstrip("/")
         _write_report(rows, start, end, cutoff, total, total_photos, total_updated)
-        _write_html_report(rows, lesser, base_url, start, end, total, total_photos, total_updated)
+        _write_html_report(rows, lesser, "https://photos.fanac.org", start, end, total, total_photos, total_updated)
         status_cb(f"Done — {len(rows)} album(s) written to {_REPORT_FILE.name} / {_REPORT_HTML.name}")
 
     finally:
@@ -183,9 +193,9 @@ def _write_html_report(rows: list, lesser: list,
             return ""
         short = [_display_label(n) for n in names]
         if len(short) == 1:
-            return f"<li>Added a smaller number of photos to {short[0]}.</li>"
+            return f"<li><b>Added a smaller number of photos to</b> {short[0]}.</li>"
         body = ", ".join(short[:-1]) + f" and {short[-1]}"
-        return f"<li>Added smaller numbers of photos to {body}.</li>"
+        return f"<li><b>Added smaller numbers of photos to:</b> {body}.</li>"
 
     # Group rows by top-level album, preserving within-group updates-desc order.
     groups: dict[str, list] = {}
