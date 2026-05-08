@@ -168,6 +168,19 @@ def _write_report(rows: list, start: date, end: date, cutoff: int,
 def _write_html_report(rows: list, lesser: list,
                        base_url: str, start: date, end: date,
                        albums_checked: int, total_photos: int, total_updated: int) -> None:
+    # These top-level albums skip two hierarchy levels instead of one when
+    # forming the display label (e.g. "Regional Conventions / Boskone / Boskone 23"
+    # → "Boskone 23", not "Boskone / Boskone 23").
+    _SKIP_TWO = {"regional conventions"}
+
+    def _display_label(fullname: str) -> str:
+        parts = fullname.split(" / ")
+        if parts[0].lower() in _SKIP_TWO:
+            tail = parts[2:]
+        else:
+            tail = parts[1:]
+        return " / ".join(tail) if tail else parts[-1]
+
     def _lesser_line(names: list) -> str:
         if not names:
             return ""
@@ -176,19 +189,29 @@ def _write_html_report(rows: list, lesser: list,
         body = ", ".join(names[:-1]) + f" and {names[-1]}"
         return f"<li>Added smaller numbers of photos to {body}.</li>"
 
+    # Group rows by top-level album, preserving within-group updates-desc order.
+    groups: dict[str, list] = {}
+    for r in rows:
+        top = r["fullname"].split(" / ")[0]
+        groups.setdefault(top, []).append(r)
+
     with _REPORT_HTML.open("w", encoding="utf-8") as f:
-        f.write(f"<b>Photos added to the following albums:</b><br>\n")
+        f.write("<b>Photos added to the following albums:</b><br>\n")
         f.write(f"{albums_checked:,} albums checked, "
                 f"{total_photos:,} total photos, "
                 f"{total_updated:,} updated in this period<br>\n")
         f.write("<ul>\n")
-        for r in rows:
-            url = f"{base_url}/index.php?/category/{r['cat_id']}"
-            f.write(f'<li><a href="{url}">{r["name"]}</a>,'
-                    f' added {r["updates"]} photos</li>\n')
+        for top_name in sorted(groups):
+            f.write(f"  <li><b>{top_name}</b>\n    <ul>\n")
+            for r in groups[top_name]:
+                url   = f"{base_url}/index.php?/category/{r['cat_id']}"
+                label = _display_label(r["fullname"])
+                f.write(f'      <li><a href="{url}">{label}</a>,'
+                        f' added {r["updates"]} photos</li>\n')
+            f.write("    </ul>\n  </li>\n")
         lesser_line = _lesser_line(lesser)
         if lesser_line:
-            f.write(f"{lesser_line}\n")
+            f.write(f"  {lesser_line}\n")
         f.write("</ul>\n")
 
 
