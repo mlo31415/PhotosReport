@@ -119,7 +119,7 @@ def run_report(start: date,
                     "total":    nb_direct,
                 })
             elif updates > 0:
-                lesser.append(album.get("name", ""))
+                lesser.append(album.get("fullname", album.get("name", "")))
 
         rows.sort(key=lambda r: r["updates"], reverse=True)
         base_url = creds["url"].rstrip("/")
@@ -171,22 +171,20 @@ def _write_html_report(rows: list, lesser: list,
     # These top-level albums skip two hierarchy levels instead of one when
     # forming the display label (e.g. "Regional Conventions / Boskone / Boskone 23"
     # → "Boskone 23", not "Boskone / Boskone 23").
-    _SKIP_TWO = {"regional conventions"}
-
     def _display_label(fullname: str) -> str:
         parts = fullname.split(" / ")
-        if parts[0].lower() in _SKIP_TWO:
+        if parts[0].lower().startswith("regional"):
             tail = parts[2:]
-        else:
-            tail = parts[1:]
-        return " / ".join(tail) if tail else parts[-1]
+            return " / ".join(tail) if tail else parts[-1]
+        return " / ".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
 
     def _lesser_line(names: list) -> str:
         if not names:
             return ""
-        if len(names) == 1:
-            return f"<li>Added a smaller number of photos to {names[0]}.</li>"
-        body = ", ".join(names[:-1]) + f" and {names[-1]}"
+        short = [_display_label(n) for n in names]
+        if len(short) == 1:
+            return f"<li>Added a smaller number of photos to {short[0]}.</li>"
+        body = ", ".join(short[:-1]) + f" and {short[-1]}"
         return f"<li>Added smaller numbers of photos to {body}.</li>"
 
     # Group rows by top-level album, preserving within-group updates-desc order.
